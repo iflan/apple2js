@@ -1,5 +1,4 @@
-/* -*- mode: JavaScript; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
-/* Copyright 2010-2013 Will Scullin <scullin@scullinsteel.com>
+/* Copyright 2010-2016 Will Scullin <scullin@scullinsteel.com>
  *
  * Permission to use, copy, modify, distribute, and sell this software and its
  * documentation for any purpose is hereby granted without fee, provided that
@@ -10,10 +9,16 @@
  * implied warranty.
  */
 
-/*globals RAM: false, toHex: false, hiresMode: false, debug: false */
 /*exported MMU */
+/*globals debug: false, toHex: false
+          hiresMode: false,
+          RAM: false
+*/
+
 function MMU(cpu, lores1, lores2, hires1, hires2, io, rom)
 {
+    'use strict';
+
     var idx;
 
     var _auxRom = 0x00;
@@ -28,14 +33,14 @@ function MMU(cpu, lores1, lores2, hires1, hires2, io, rom)
     var _writebsr;
 
     // Auxilliary ROM
-    var _intcxrom; 
+    var _intcxrom;
     var _slot3rom;
 
     // Auxilliary RAM
     var _auxRamRead;
     var _auxRamWrite;
     var _altzp;
-    
+
     // Video
     var _80store = false;
     var _page2;
@@ -51,7 +56,7 @@ function MMU(cpu, lores1, lores2, hires1, hires2, io, rom)
         _auxRamWrite = false;
         _altzp = false;
 
-        _intcxrom = false; 
+        _intcxrom = false;
         _slot3rom = false;
 
         _80store = false;
@@ -93,7 +98,7 @@ function MMU(cpu, lores1, lores2, hires1, hires2, io, rom)
     var memC0_C0 = [io];
     // var memC1_CF = [emptyslots, rom];
     var memD0_DF = [rom,
-                    new RAM(0xD0,0xDF), new RAM(0xD0,0xDF), 
+                    new RAM(0xD0,0xDF), new RAM(0xD0,0xDF),
                     new RAM(0xD0,0xDF), new RAM(0xD0,0xDF)];
     var memE0_FF = [rom, new RAM(0xE0,0xFF), new RAM(0xE0,0xFF)];
 
@@ -172,7 +177,7 @@ function MMU(cpu, lores1, lores2, hires1, hires2, io, rom)
         _readPages[idx] = _pages[idx][0];
         _writePages[idx] = _pages[idx][0];
     }
-    
+
     /*
      * I/O Switch locations
      */
@@ -235,7 +240,7 @@ function MMU(cpu, lores1, lores2, hires1, hires2, io, rom)
         _OFFBSR1: 0x8e,
         _READWRBSR1: 0x8f
     };
-    
+
     function _updateBanks() {
         if (_auxRamRead) {
             for (idx = 0x02; idx < 0xC0; idx++) {
@@ -362,7 +367,7 @@ function MMU(cpu, lores1, lores2, hires1, hires2, io, rom)
         case LOC._80STOREOFF:
             if (typeof val != 'undefined') {
                 _80store = false;
-                // _debug("80 Store Off");
+                // _debug('80 Store Off');
             } else {
                 // Chain to io for keyboard
                 result = io.ioSwitch(off, val);
@@ -371,73 +376,73 @@ function MMU(cpu, lores1, lores2, hires1, hires2, io, rom)
         case LOC._80STOREON:
             if (typeof val != 'undefined') {
                 _80store = true;
-                // _debug("80 Store On");
-            } else 
+                // _debug('80 Store On');
+            } else
                 result = 0;
             break;
         case LOC.RAMRDOFF:
             if (typeof val != 'undefined') {
                 _auxRamRead = false;
-                _debug("Aux RAM Read Off");
-            } else 
+                _debug('Aux RAM Read Off');
+            } else
                 result = 0;
             break;
         case LOC.RAMRDON:
             if (typeof val != 'undefined') {
                 _auxRamRead = true;
-                _debug("Aux RAM Read On");
-            } else 
+                _debug('Aux RAM Read On');
+            } else
                 result = 0;
             break;
         case LOC.RAMWROFF:
             if (typeof val != 'undefined') {
                 _auxRamWrite = false;
-                _debug("Aux RAM Write Off");
-            } else 
+                _debug('Aux RAM Write Off');
+            } else
                 result = 0;
             break;
         case LOC.RAMWRON:
             if (typeof val != 'undefined') {
                 _auxRamWrite = true;
-                _debug("Aux RAM Write On");
-            } else 
+                _debug('Aux RAM Write On');
+            } else
                 result = 0;
             break;
 
         case LOC.INTCXROMOFF:
             if (typeof val != 'undefined') {
                 _intcxrom = false;
-                // _debug("Int CX ROM Off");
+                // _debug('Int CX ROM Off');
             }
             break;
         case LOC.INTCXROMON:
             if (typeof val != 'undefined') {
                 _intcxrom = true;
-                // _debug("Int CX ROM On");
+                // _debug('Int CX ROM On');
             }
             break;
-        case LOC.ALTZPOFF: // 0x08 
+        case LOC.ALTZPOFF: // 0x08
             if (typeof val != 'undefined') {
                 _altzp = false;
-                _debug("Alt ZP Off");
+                _debug('Alt ZP Off');
             }
             break;
         case LOC.ALTZPON: // 0x09
             if (typeof val != 'undefined') {
                 _altzp = true;
-                _debug("Alt ZP On");
+                _debug('Alt ZP On');
             }
             break;
         case LOC.SLOTC3ROMOFF:
             if (typeof val != 'undefined') {
                 _slot3rom = false;
-                _debug("Slot 3 ROM Off");
+                _debug('Slot 3 ROM Off');
             }
             break;
         case LOC.SLOTC3ROMON:
             if (typeof val != 'undefined') {
                 _slot3rom = true;
-                _debug("Slot 3 ROM On");
+                _debug('Slot 3 ROM On');
             }
             break;
 
@@ -459,86 +464,86 @@ function MMU(cpu, lores1, lores2, hires1, hires2, io, rom)
             _bank1 = false;
             _readbsr = true;
             _writebsr = false;
-            _debug("Bank 2 Read");
+            _debug('Bank 2 Read');
             break;
         case LOC.WRITEBSR2: // 0xC081
         case LOC._WRITEBSR2:
             _bank1 = false;
             _readbsr = false;
             _writebsr = _writebsr || ((_last & 0xF3) == (off & 0xF3));
-            _debug("Bank 2 Write");
+            _debug('Bank 2 Write');
             break;
         case LOC.OFFBSR2: // 0xC082
         case LOC._OFFBSR2:
             _bank1 = false;
             _readbsr = false;
             _writebsr = false;
-            _debug("Bank 2 Off");
+            _debug('Bank 2 Off');
             break;
         case LOC.READWRBSR2: // 0xC083
         case LOC._READWRBSR2:
             _bank1 = false;
             _readbsr = true;
             _writebsr = _writebsr || ((_last & 0xF3) == (off & 0xF3));
-            _debug("Bank 2 Read/Write");
+            _debug('Bank 2 Read/Write');
             break;
         case LOC.READBSR1: // 0xC088
         case LOC._READBSR1:
             _bank1 = true;
             _readbsr = true;
             _writebsr = false;
-            _debug("Bank 1 Read");
+            _debug('Bank 1 Read');
             break;
         case LOC.WRITEBSR1: // 0xC089
         case LOC._WRITEBSR1:
             _bank1 = true;
             _readbsr = false;
             _writebsr = _writebsr || ((_last & 0xF3) == (off & 0xF3));
-            _debug("Bank 1 Write");
+            _debug('Bank 1 Write');
             break;
         case LOC.OFFBSR1: // 0xC08A
         case LOC._OFFBSR1:
             _bank1 = true;
             _readbsr = false;
             _writebsr = false;
-            _debug("Bank 1 Off");
+            _debug('Bank 1 Off');
             break;
         case LOC.READWRBSR1: // 0xC08B
         case LOC._READWRBSR1:
             _bank1 = true;
             _readbsr = true;
             _writebsr = _writebsr || ((_last & 0xF3) == (off & 0xF3));
-            _debug("Bank 1 Read/Write");
+            _debug('Bank 1 Read/Write');
             break;
 
         // Status registers
 
         case LOC.BSRBANK2:
-            _debug("Bank 2 Read " + !_bank1);
-            result = !_bank1 ? 0x80 : 0x00; 
+            _debug('Bank 2 Read ' + !_bank1);
+            result = !_bank1 ? 0x80 : 0x00;
             break;
         case LOC.BSRREADRAM:
-            _debug("Bank SW RAM Read " + _readbsr);
+            _debug('Bank SW RAM Read ' + _readbsr);
             result = _readbsr ? 0x80 : 0x00;
             break;
         case LOC.RAMRD: // 0xC013
-            _debug("Aux RAM Read " + _auxRamRead);
+            _debug('Aux RAM Read ' + _auxRamRead);
             result = _auxRamRead ? 0x80 : 0x0;
             break;
         case LOC.RAMWRT: // 0xC014
-            _debug("Aux RAM Write " + _auxRamWrite);
+            _debug('Aux RAM Write ' + _auxRamWrite);
             result = _auxRamWrite ? 0x80 : 0x0;
             break;
         case LOC.INTCXROM: // 0xC015
-            // _debug("Int CX ROM " + _intcxrom);
+            // _debug('Int CX ROM ' + _intcxrom);
             result = _intcxrom ? 0x80 : 0x00;
             break;
         case LOC.ALTZP: // 0xC016
-            _debug("Alt ZP " + _altzp);
+            _debug('Alt ZP ' + _altzp);
             result = _altzp ? 0x80 : 0x0;
             break;
         case LOC.SLOTC3ROM: // 0xC017
-            _debug("Slot C3 ROM " + _slot3rom);
+            _debug('Slot C3 ROM ' + _slot3rom);
             result = _slot3rom ? 0x00 : 0x80;
             break;
         case LOC._80STORE: // 0xC018
@@ -550,7 +555,7 @@ function MMU(cpu, lores1, lores2, hires1, hires2, io, rom)
             break;
 
         default:
-            debug("MMU missing register " + toHex(off));
+            debug('MMU missing register ' + toHex(off));
             break;
         }
         _last = off;
@@ -571,10 +576,10 @@ function MMU(cpu, lores1, lores2, hires1, hires2, io, rom)
             io.start();
             lores1.start();
             lores2.start();
-            
+
             // Do us afterward because we override some of the above
             io.registerSwitches(this, LOC);
-            
+
             return 0x00;
         },
         end: function mmu_end() {
@@ -608,7 +613,7 @@ function MMU(cpu, lores1, lores2, hires1, hires2, io, rom)
         auxRom: function mmu_auxRom(slot, rom) {
             var idx;
             if (_auxRom != slot) {
-                _debug("Slot " + slot + " expansion rom added");
+                _debug('Slot ' + slot + ' expansion rom added');
                 _auxRom = slot;
                 for (idx = 0xc8; idx < 0xd0; idx++) {
                     _pages[idx][0] = rom;
@@ -632,7 +637,7 @@ function MMU(cpu, lores1, lores2, hires1, hires2, io, rom)
                 auxRamRead: _auxRamRead,
                 auxRamWrite: _auxRamWrite,
                 altzp: _altzp,
-    
+
                 _80store: _80store,
                 page2: _page2,
 
@@ -649,14 +654,14 @@ function MMU(cpu, lores1, lores2, hires1, hires2, io, rom)
             _readbsr = state.readbsr;
             _writebsr = state.writebsr;
             _bank1 = state.bank1;
-            
+
             _auxRom = state.auxRom;
             _intcxrom = state.intcxrom;
             _slot3rom = state.slot3rom;
             _auxRamRead = state.auxRamRead;
             _auxRamWrite = state.auxRamWrite;
             _altzp = state.altzp;
-            
+
             _80store = state._80store;
             _page2 = state.page2;
 
