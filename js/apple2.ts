@@ -1,34 +1,54 @@
 import Apple2IO from './apple2io';
-import { HiresPage, LoresPage, VideoModes } from './canvas';
-import CPU6502, { PageHandler, CpuState } from './cpu6502';
-import MMU from './mmu';
-import RAM from './ram';
-import { debug } from './util';
+import {
+    HiresPage,
+    LoresPage,
+    VideoModes,
+    VideoModesState,
+} from './videomodes';
+import {
+    HiresPage2D,
+    LoresPage2D,
+    VideoModes2D,
+} from './canvas';
+import {
+    HiresPageGL,
+    LoresPageGL,
+    VideoModesGL,
+} from './gl';
+import ROM from './roms/rom';
+import { Apple2IOState } from './apple2io';
+import CPU6502, { CpuState } from './cpu6502';
+import MMU, { MMUState } from './mmu';
+import RAM, { RAMState } from './ram';
 
 import SYMBOLS from './symbols';
-import { Restorable } from './types';
+import Debugger, { DebuggerContainer } from './debugger';
 
-interface Options {
-    characterRom: any,
+import { Restorable, rom } from './types';
+import { processGamepad } from './ui/gamepad';
+
+export interface Apple2Options {
+    characterRom: rom,
     enhanced: boolean,
     e: boolean,
-    multiScreen: boolean,
-    rom: PageHandler,
-    screen: any[],
+    gl: boolean,
+    rom: ROM,
+    canvas: HTMLCanvasElement,
     tick: () => void,
 }
 
 interface State {
     cpu: CpuState,
+    vm: VideoModesState,
+    io: Apple2IOState,
+    mmu?: MMUState,
+    ram?: RAMState[],
 }
 
-export class Apple2 implements Restorable<State> {
+export class Apple2 implements Restorable<State>, DebuggerContainer {
     private paused = false;
 
-    private DEBUG = false;
-    private TRACE = false;
-    private MAX_TRACE = 256;
-    private trace: string[] = [];
+    private theDebugger?: Debugger;
 
     private runTimer: number | null = null;
     private runAnimationFrame: number | null = null;
@@ -41,9 +61,9 @@ export class Apple2 implements Restorable<State> {
     private vm: VideoModes;
 
     private io: Apple2IO;
-    private mmu: MMU;
+    private mmu: MMU | undefined;
+    private ram: [RAM, RAM, RAM] | undefined;
 
-    private multiScreen: boolean;
     private tick: () => void;
 
     private stats = {
@@ -51,34 +71,38 @@ export class Apple2 implements Restorable<State> {
         renderedFrames: 0
     };
 
-    constructor(options: Options) {
+    constructor(options: Apple2Options) {
+        const LoresPage = options.gl ? LoresPageGL : LoresPage2D;
+        const HiresPage = options.gl ? HiresPageGL : HiresPage2D;
+        const VideoModes = options.gl ? VideoModesGL : VideoModes2D;
+
         this.cpu = new CPU6502({ '65C02': options.enhanced });
-        this.gr = new LoresPage(1, options.characterRom, options.e, options.screen[0]);
-        this.gr2 = new LoresPage(2, options.characterRom, options.e, options.screen[1]);
-        this.hgr = new HiresPage(1, options.screen[2]);
-        this.hgr2 = new HiresPage(2, options.screen[3]);
-        this.vm = new VideoModes(this.gr, this.hgr, this.gr2, this.hgr2, options.e);
-        this.vm.multiScreen(options.multiScreen);
+        this.gr = new LoresPage(1, options.characterRom, options.e);
+        this.gr2 = new LoresPage(2, options.characterRom, options.e);
+        this.hgr = new HiresPage(1);
+        this.hgr2 = new HiresPage(2);
+        this.vm = new VideoModes(this.gr, this.hgr, this.gr2, this.hgr2, options.canvas, options.e);
         this.vm.enhanced(options.enhanced);
         this.io = new Apple2IO(this.cpu, this.vm);
-        this.multiScreen = options.multiScreen;
         this.tick = options.tick;
 
         if (options.e) {
             this.mmu = new MMU(this.cpu, this.vm, this.gr, this.gr2, this.hgr, this.hgr2, this.io, options.rom);
             this.cpu.addPageHandler(this.mmu);
         } else {
-            const ram1 = new RAM(0x00, 0x03);
-            const ram2 = new RAM(0x0C, 0x1F);
-            const ram3 = new RAM(0x60, 0xBF);
+            this.ram = [
+                new RAM(0x00, 0x03),
+                new RAM(0x0C, 0x1F),
+                new RAM(0x60, 0xBF)
+            ];
 
-            this.cpu.addPageHandler(ram1);
+            this.cpu.addPageHandler(this.ram[0]);
             this.cpu.addPageHandler(this.gr);
             this.cpu.addPageHandler(this.gr2);
-            this.cpu.addPageHandler(ram2);
+            this.cpu.addPageHandler(this.ram[1]);
             this.cpu.addPageHandler(this.hgr);
             this.cpu.addPageHandler(this.hgr2);
-            this.cpu.addPageHandler(ram3);
+            this.cpu.addPageHandler(this.ram[2]);
             this.cpu.addPageHandler(this.io);
             this.cpu.addPageHandler(options.rom);
         }
@@ -90,9 +114,13 @@ export class Apple2 implements Restorable<State> {
      * `runAnimationFrame` will be non-null.
      */
     run() {
+        this.paused = false;
         if (this.runTimer || this.runAnimationFrame) {
             return; // already running
         }
+
+        this.theDebugger = new Debugger(this);
+        this.theDebugger.addSymbols(SYMBOLS);
 
         const interval = 30;
 
@@ -108,19 +136,8 @@ export class Apple2 implements Restorable<State> {
                 step = stepMax;
             }
 
-            if (this.DEBUG) {
-                this.cpu.stepCyclesDebug(this.TRACE ? 1 : step, () => {
-                    const line = this.cpu.dumpRegisters() + ' ' +
-                        this.cpu.dumpPC(undefined, SYMBOLS);
-                    if (this.TRACE) {
-                        debug(line);
-                    } else {
-                        this.trace.push(line);
-                        if (this.trace.length > this.MAX_TRACE) {
-                            this.trace.shift();
-                        }
-                    }
-                });
+            if (this.theDebugger) {
+                this.theDebugger.stepCycles(step);
             } else {
                 this.cpu.stepCycles(step);
             }
@@ -128,10 +145,9 @@ export class Apple2 implements Restorable<State> {
                 this.mmu.resetVB();
             }
             if (this.io.annunciator(0)) {
-                if (this.multiScreen) {
-                    this.vm.blit();
-                }
-                if (this.io.blit()) {
+                const imageData = this.io.blit();
+                if (imageData) {
+                    this.vm.blit(imageData);
                     this.stats.renderedFrames++;
                 }
             } else {
@@ -142,6 +158,7 @@ export class Apple2 implements Restorable<State> {
             this.stats.frames++;
             this.io.tick();
             this.tick();
+            processGamepad(this.io);
 
             if (!this.paused && requestAnimationFrame) {
                 this.runAnimationFrame = requestAnimationFrame(runFn);
@@ -155,6 +172,7 @@ export class Apple2 implements Restorable<State> {
     }
 
     stop() {
+        this.paused = true;
         if (this.runTimer) {
             clearInterval(this.runTimer);
         }
@@ -168,6 +186,10 @@ export class Apple2 implements Restorable<State> {
     getState(): State {
         const state: State = {
             cpu: this.cpu.getState(),
+            vm: this.vm.getState(),
+            io: this.io.getState(),
+            mmu: this.mmu?.getState(),
+            ram: this.ram?.map(bank => bank.getState()),
         };
 
         return state;
@@ -175,6 +197,18 @@ export class Apple2 implements Restorable<State> {
 
     setState(state: State) {
         this.cpu.setState(state.cpu);
+        this.vm.setState(state.vm);
+        this.io.setState(state.io);
+        if (this.mmu && state.mmu) {
+            this.mmu.setState(state.mmu);
+        }
+        if (this.ram) {
+            this.ram.forEach((bank, idx) => {
+                if (state.ram) {
+                    bank.setState(state.ram[idx]);
+                }
+            });
+        }
     }
 
     reset() {
@@ -193,7 +227,16 @@ export class Apple2 implements Restorable<State> {
         return this.io;
     }
 
+    getMMU() {
+        return this.mmu;
+    }
+
+
     getVideoModes() {
         return this.vm;
+    }
+
+    getDebugger() {
+        return this.theDebugger;
     }
 }

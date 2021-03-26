@@ -1,7 +1,7 @@
 
 /**
  * Extracts the members of a constant array as a type. Used as:
- * 
+ *
  * @example
  * const SOME_VALUES = ['a', 'b', 1, 2] as const;
  * type SomeValues = MemberOf<typeof SOME_VALUES>; // 'a' | 'b' | 1 | 2
@@ -29,16 +29,34 @@ export type memory = Uint8Array;
 /** A raw region of memory. */
 export type rom = ReadonlyUint8Array;
 
-/** A mapped region of memory. */
 export interface Memory {
-    /** Start page. */
-    start(): byte;
-    /** End page, inclusive. */
-    end(): byte;
     /** Read a byte. */
     read(page: byte, offset: byte): byte;
     /** Write a byte. */
     write(page: byte, offset: byte, value: byte): void;
+}
+
+/** A mapped region of memory. */
+export interface MemoryPages extends Memory {
+    /** Start page. */
+    start(): byte;
+    /** End page, inclusive. */
+    end(): byte;
+}
+
+/* An interface card */
+export interface Card extends Memory, Restorable {
+    /* Reset the card */
+    reset?(): void;
+
+    /* Draw card to canvas */
+    blit?(): ImageData | undefined;
+
+    /* Process period events */
+    tick?(): void;
+
+    /* Read or Write an I/O switch */
+    ioSwitch(off: byte, val?: byte): byte | undefined;
 }
 
 export const DISK_FORMATS = [
@@ -70,7 +88,9 @@ export interface DiskIIDrive extends Drive {
     dirty: boolean,
 }
 
-export interface Restorable<T> {
+export type TapeData = Array<[duration: number, high: boolean]>;
+
+export interface Restorable<T = any> {
     getState(): T;
     setState(state: T): void;
 }
@@ -80,3 +100,6 @@ export type TypedArrayMutableProperties = 'copyWithin' | 'fill' | 'reverse' | 's
 export interface ReadonlyUint8Array extends Omit<Uint8Array, TypedArrayMutableProperties> {
     readonly [n: number]: number
 }
+
+// Readonly RGB color value
+export type Color = readonly [r: byte, g: byte, b: byte];

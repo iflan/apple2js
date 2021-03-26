@@ -9,9 +9,10 @@
  * implied warranty.
  */
 
-import CPU6502, { PageHandler } from './cpu6502';
-import { byte } from './types';
-import { debug } from './util';
+import CPU6502 from './cpu6502';
+import { Card, Memory, MemoryPages, TapeData, byte, Restorable } from './types';
+import { debug, garbage } from './util';
+import { VideoModes } from './videomodes';
 
 type slot = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
 type button = 0 | 1 | 2;
@@ -25,8 +26,9 @@ interface Annunciators {
     3: boolean,
 }
 
-interface State {
+export interface Apple2IOState {
     annunciators: Annunciators;
+    cards: Array<any | null>
 }
 
 export type SampleListener = (sample: number[]) => void;
@@ -65,9 +67,9 @@ const LOC = {
     ACCEL: 0x74, // CPU Speed control
 };
 
-export default class Apple2IO implements PageHandler {
-    private _slot: any[] = []; // TODO(flan): Needs typing.
-    private _auxRom: any = null; // TODO(flan): Needs typing.
+export default class Apple2IO implements MemoryPages, Restorable<Apple2IOState> {
+    private _slot: Array<Card | null> = new Array(7).fill(null);
+    private _auxRom: Memory | null = null;
 
     private _khz = 1023;
     private _rate = 44000;
@@ -79,7 +81,7 @@ export default class Apple2IO implements PageHandler {
     private _key = 0;
     private _keyDown = false;
     private _button = [false, false, false];
-    private _paddle = [0.0, 0.0, 0.0, 0, 0];
+    private _paddle = [0.0, 0.0, 0.0, 0.0];
     private _phase = -1;
     private _sample: number[] = [];
     private _sampleIdx = 0;
@@ -94,12 +96,12 @@ export default class Apple2IO implements PageHandler {
     private _trigger = 0;
     private _annunciators: Annunciators = [false, false, false, false];
 
-    private _tape = [];
+    private _tape: TapeData = [];
     private _tapeOffset = 0;
-    private _tapeNext = 0;
+    private _tapeNext: number = 0;
     private _tapeCurrent = false;
 
-    constructor(private readonly cpu: CPU6502, private readonly vm: any) {
+    constructor(private readonly cpu: CPU6502, private readonly vm: VideoModes) {
         this.init();
     }
 
@@ -107,7 +109,7 @@ export default class Apple2IO implements PageHandler {
         this._calcSampleRate();
     }
 
-    _debug(..._args: any) {
+    _debug(..._args: any[]) {
         // debug.apply(this, arguments);
     }
 
@@ -139,6 +141,7 @@ export default class Apple2IO implements PageHandler {
     _access(off: byte, val?: byte): byte | undefined {
         let result: number | undefined = 0;
         const now = this.cpu.getCycles();
+        const writeMode = val === undefined;
         const delta = now - this._trigger;
         switch (off) {
             case LOC.CLRTEXT:
@@ -256,7 +259,9 @@ export default class Apple2IO implements PageHandler {
                         result = this._key;
                         break;
                     case LOC.STROBE: // C01x
-                        this._key &= 0x7f;
+                        if (off === LOC.STROBE || writeMode) {
+                            this._key &= 0x7f;
+                        }
                         if (this._buffer.length > 0) {
                             let val = this._buffer.shift() as string;
                             if (val == '\n') {
@@ -264,7 +269,10 @@ export default class Apple2IO implements PageHandler {
                             }
                             this._key = val.charCodeAt(0) | 0x80;
                         }
-                        result = (this._keyDown ? 0x80 : 0x00) | this._key;
+                        result = this._key & 0x7f;
+                        if (off === LOC.STROBE) {
+                            result |= this._keyDown ? 0x80 : 0x00;
+                        }
                         break;
                     case LOC.TAPEOUT: // C02x
                         this._phase = -this._phase;
@@ -318,8 +326,8 @@ export default class Apple2IO implements PageHandler {
     reset() {
         for (let slot = 0; slot < 8; slot++) {
             const card = this._slot[slot];
-            if (card && card.reset) {
-                card.reset();
+            if (card) {
+                card.reset?.();
             }
         }
         this.vm.reset();
@@ -327,20 +335,20 @@ export default class Apple2IO implements PageHandler {
 
     blit() {
         const card = this._slot[3];
-        if (card && card.blit) {
-            return card.blit();
+        if (card) {
+            return card.blit?.();
         }
-        return false;
+        return undefined;
     }
 
     read(page: byte, off: byte) {
-        let result = 0;
+        let result: number = 0;
         let slot;
         let card;
 
         switch (page) {
             case 0xc0:
-                result = this.ioSwitch(off, undefined);
+                result = this.ioSwitch(off, undefined) || 0;
                 break;
             case 0xc1:
             case 0xc2:
@@ -357,6 +365,8 @@ export default class Apple2IO implements PageHandler {
                 }
                 if (card) {
                     result = card.read(page, off);
+                } else {
+                    result = garbage();
                 }
                 break;
             default:
@@ -401,17 +411,20 @@ export default class Apple2IO implements PageHandler {
         }
     }
 
-    getState() {
+    getState(): Apple2IOState {
+        // TODO vet more potential state
         return {
-            annunciators: this._annunciators[0]
+            annunciators: this._annunciators,
+            cards: this._slot.map((card) => card ? card.getState() : null)
         };
     }
 
-    setState(state: State) {
+    setState(state: Apple2IOState) {
         this._annunciators = state.annunciators;
+        state.cards.map((cardState, idx) => this._slot[idx]?.setState(cardState));
     }
 
-    setSlot(slot: slot, card: byte) {
+    setSlot(slot: slot, card: Card) {
         this._slot[slot] = card;
     }
 
@@ -453,7 +466,7 @@ export default class Apple2IO implements PageHandler {
         }
     }
 
-    setTape(tape: any) { // TODO(flan): Needs typing.
+    setTape(tape: TapeData) {
         debug('Tape length: ' + tape.length);
         this._tape = tape;
         this._tapeOffset = -1;
@@ -470,9 +483,7 @@ export default class Apple2IO implements PageHandler {
     tick() {
         this._tick();
         for (let idx = 0; idx < 8; idx++) {
-            if (this._slot[idx] && this._slot[idx].tick) {
-                this._slot[idx].tick();
-            }
+            this._slot[idx]?.tick?.();
         }
     }
 

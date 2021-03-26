@@ -1,5 +1,6 @@
 import MicroModal from 'micromodal';
 
+import { base64_json_parse, base64_json_stringify } from '../base64';
 import Audio from './audio';
 import DriveLights from './drive_lights';
 import { DISK_FORMATS } from '../types';
@@ -127,8 +128,8 @@ export function handleDrop(drive, event) {
     }
     var dt = event.dataTransfer;
     if (dt.files.length == 1) {
-
-        doLoadLocal(drive, dt.files[0]);
+        var runOnLoad = event.shiftKey;
+        doLoadLocal(drive, dt.files[0], { runOnLoad });
     } else if (dt.files.length == 2) {
         doLoadLocal(1, dt.files[0]);
         doLoadLocal(2, dt.files[1]);
@@ -164,7 +165,9 @@ function loadingStop () {
     MicroModal.close('loading-modal');
 
     if (!paused) {
-        _apple2.run();
+        vm.ready.then(() => {
+            _apple2.run();
+        });
     }
 }
 
@@ -242,16 +245,46 @@ export function doDelete(name) {
     }
 }
 
-function doLoadLocal(drive, file) {
+const CIDERPRESS_EXTENSION = /#([0-9a-f]{2})([0-9a-f]{4})$/i;
+const BIN_TYPES = ['bin'];
+
+function doLoadLocal(drive, file, options = {}) {
     var parts = file.name.split('.');
     var ext = parts[parts.length - 1].toLowerCase();
-    if (DISK_FORMATS.indexOf(ext) > -1) {
+    var matches = file.name.match(CIDERPRESS_EXTENSION);
+    var type, aux;
+    if (matches && matches.length === 3) {
+        [, type, aux] = matches;
+    }
+    if (DISK_FORMATS.includes(ext)) {
         doLoadLocalDisk(drive, file);
-    } else if (TAPE_TYPES.indexOf(ext) > -1) {
+    } else if (TAPE_TYPES.includes(ext)) {
         tape.doLoadLocalTape(file);
+    } else if (BIN_TYPES.includes(ext) || type === '06' || options.address) {
+        doLoadBinary(file, { address: parseInt(aux || '2000', 16), ...options });
     } else {
         openAlert('Unknown file type: ' + ext);
     }
+}
+
+function doLoadBinary(file, options) {
+    loadingStart();
+
+    var fileReader = new FileReader();
+    fileReader.onload = function() {
+        let { address } = options;
+        const bytes = new Uint8Array(this.result);
+        for (let idx = 0; idx < this.result.byteLength; idx++) {
+            cpu.write(address >> 8, address & 0xff, bytes[idx]);
+            address++;
+        }
+        if (options.runOnLoad) {
+            cpu.reset();
+            cpu.setPC(options.address);
+        }
+        loadingStop();
+    };
+    fileReader.readAsArrayBuffer(file);
 }
 
 function doLoadLocalDisk(drive, file) {
@@ -261,15 +294,19 @@ function doLoadLocalDisk(drive, file) {
         var parts = file.name.split('.');
         var ext = parts.pop().toLowerCase();
         var name = parts.join('.');
+
+        // Remove any json file reference
+        var files = document.location.hash.split('|');
+        files[drive - 1] = '';
+        document.location.hash = files.join('|');
+
         if (this.result.byteLength >= 800 * 1024) {
             if (_smartPort.setBinary(drive, name, ext, this.result)) {
-                driveLights.label(drive, name);
                 focused = false;
                 initGamepad();
             }
         } else {
             if (_disk2.setBinary(drive, name, ext, this.result)) {
-                driveLights.label(drive, name);
                 focused = false;
                 initGamepad();
             }
@@ -324,12 +361,10 @@ export function doLoadHTTP(drive, _url) {
             var name = decodeURIComponent(fileParts.join('.'));
             if (data.byteLength >= 800 * 1024) {
                 if (_smartPort.setBinary(drive, name, ext, data)) {
-                    driveLights.label(drive, name);
                     initGamepad();
                 }
             } else {
                 if (_disk2.setBinary(drive, name, ext, data)) {
-                    driveLights.label(drive, name);
                     initGamepad();
                 }
             }
@@ -465,7 +500,6 @@ function loadDisk(drive, disk) {
     disk_cur_cat[drive] = category;
     disk_cur_name[drive] = name;
 
-    driveLights.label(drive, name);
     _disk2.setDisk(drive, disk);
     initGamepad(disk.gamepad);
 }
@@ -597,7 +631,7 @@ function _keydown(evt) {
         evt.preventDefault();
 
         var key = keyboard.mapKeyEvent(evt);
-        if (key != 0xff) {
+        if (key !== 0xff) {
             io.keyDown(key);
         }
     }
@@ -628,9 +662,11 @@ function _keydown(evt) {
     } else if (evt.keyCode === 114) { // F3
         io.keyDown(0x1b);
     } else if (evt.keyCode === 117) { // F6 Quick Save
-        _apple2.getState();
+        window.localStorage.state = base64_json_stringify(_apple2.getState());
     } else if (evt.keyCode === 120) { // F9 Quick Restore
-        _apple2.setState();
+        if (window.localStorage.state) {
+            _apple2.setState(base64_json_parse(window.localStorage.state));
+        }
     } else if (evt.keyCode == 16) { // Shift
         keyboard.shiftKey(true);
     } else if (evt.keyCode == 20) { // Caps lock
@@ -668,22 +704,23 @@ function _keyup(evt) {
 }
 
 export function updateScreen() {
-    var green = document.querySelector('#green_screen').checked;
+    var mono = document.querySelector('#mono_screen').checked;
     var scanlines = document.querySelector('#show_scanlines').checked;
+    var gl = document.querySelector('#gl_canvas').checked;
 
     var screen = document.querySelector('#screen');
     var overscan = document.querySelector('.overscan');
-    if (scanlines) {
+    if (scanlines && !gl) {
         overscan.classList.add('scanlines');
     } else {
         overscan.classList.remove('scanlines');
     }
-    if (green) {
-        screen.classList.add('green');
+    if (mono && !gl) {
+        screen.classList.add('mono');
     } else {
-        screen.classList.remove('green');
+        screen.classList.remove('mono');
     }
-    vm.mono(green);
+    vm.mono(mono);
 }
 
 export function updateCPU() {
@@ -744,7 +781,9 @@ function _mousemove(evt) {
 export function pauseRun() {
     var label = document.querySelector('#pause-run i');
     if (paused) {
-        _apple2.run();
+        vm.ready.then(() => {
+            _apple2.run();
+        });
         label.classList.remove('fa-play');
         label.classList.add('fa-pause');
     } else {
@@ -780,7 +819,7 @@ export function clearPrinterPaper() {
     _printer.clear();
 }
 
-export function initUI(apple2, disk2, smartPort, printer, e) {
+function onLoaded(apple2, disk2, smartPort, printer, e) {
     _apple2 = apple2;
     cpu = _apple2.getCPU();
     io = _apple2.getIO();
@@ -885,6 +924,14 @@ export function initUI(apple2, disk2, smartPort, printer, e) {
         _apple2.stop();
         processHash(hash);
     } else {
-        _apple2.run();
+        vm.ready.then(() => {
+            _apple2.run();
+        });
     }
+}
+
+export function initUI(apple2, disk2, smartPort, printer, e) {
+    window.addEventListener('load', () => {
+        onLoaded(apple2, disk2, smartPort, printer, e);
+    });
 }
